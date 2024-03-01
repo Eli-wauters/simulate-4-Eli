@@ -26,11 +26,11 @@
 #define PCLK_GPIO_NUM     5
 
 // WiFi Credentials
-const char* ssid = "IoT";
-const char* password = "KdGIoT43!";
+const char* ssid = "******";
+const char* password = "******!";
 
 // MQTT Configuration
-const char* mqtt_server = "10.6.121.170"; // Local IP address of MQTT server
+const char* mqtt_server = ".****"; // Local IP address of MQTT server
 
 // Motion Sensor and Indicator
 void motionSensor();
