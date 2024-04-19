@@ -1,0 +1,21 @@
+import requests
+
+# Vervang deze placeholders door je eigen bot token en chat ID
+telegram_bot_token = ""
+telegram_chat_id = ""
+
+def send_telegram_message(message):
+    url = f"https://api.telegram.org/bot{telegram_bot_token}/sendMessage"
+    params = {"chat_id": telegram_chat_id, "text": message}
+    response = requests.get(url, params=params)
+    if response.ok:
+        print("Testbericht succesvol verzonden naar Telegram.")
+    else:
+        print(f"Fout bij het verzenden van testbericht naar Telegram. Statuscode: {response.status_code}")
+
+def main():
+    # Testbericht naar Telegram sturen
+    send_telegram_message("Dit is een testbericht naar Telegram!")
+
+if __name__ == '__main__':
+    main()
