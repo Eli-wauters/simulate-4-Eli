@@ -1,0 +1,24 @@
+// Pin waar de output van de bewegingssensor is aangesloten
+const int motionSensorPin = 2;
+
+void setup() {
+  // Start de seriële communicatie
+  Serial.begin(9600);
+  
+  // Stel de pin van de bewegingssensor in als input
+  pinMode(motionSensorPin, INPUT);
+}
+
+void loop() {
+  // Lees de waarde van de bewegingssensor
+  int motionValue = digitalRead(motionSensorPin);
+  
+  // Controleer of er beweging is gedetecteerd
+  if (motionValue == HIGH) {
+    // Beweging gedetecteerd, stuur bericht naar seriële monitor
+    Serial.println("Beweging gedetecteerd!");
+  }
+  
+  // Wacht een korte periode voordat je opnieuw controleert
+  delay(100);
+}
