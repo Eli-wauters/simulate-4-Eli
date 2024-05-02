@@ -1,4 +1,4 @@
-// Pin waar de output van de bewegingssensor is aangesloten
+// Pin waar de output vande bewegingssensor is aangesloten
 const int motionSensorPin = 2;
 void setup() {
   // Start de seriële communicatie
