@@ -1,5 +1,4 @@
 import requests
-
 # Vervang deze placeholders door je eigen bot token en chat ID
 telegram_bot_token = ""
 telegram_chat_id = ""
