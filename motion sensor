@@ -1,6 +1,5 @@
 // Pin waar de output van de bewegingssensor is aangesloten
 const int motionSensorPin = 2;
-
 void setup() {
   // Start de seriële communicatie
   Serial.begin(9600);
