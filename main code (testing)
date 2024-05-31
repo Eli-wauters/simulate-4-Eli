@@ -1,17 +1,44 @@
-#include "esp_camera.h"
-#include <WiFi.h>
-#include "DFRobot_AXP313A.h"
-//
-// WARNING!!! PSRAM IC required for UXGA resolution and high JPEG quality
-//            Ensure ESP32 Wrover Module or other board with PSRAM is selected
-//            Partial images will be transmitted if image exceeds buffer size
-//            You must select partition scheme from the board menu that has at least 3MB APP space.
-//            Face Recognition is DISABLED for ESP32 and ESP32-S2, because it takes up from 15 
-//            seconds to process single frame. Face Detection is ENABLED if PSRAM is enabled as well
+/*********
+  Rui Santos
+  Complete instructions at: https://RandomNerdTutorials.com/esp32-cam-save-picture-firebase-storage/
+  
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files.
+  The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
-// ===================
-// Select camera model
-// ===================
+  Based on the example provided by the ESP Firebase Client Library
+*********/
+
+#include "Arduino.h"
+#include "WiFi.h"
+#include "esp_camera.h"
+#include "DFRobot_AXP313A.h"
+#include "soc/soc.h"           // Disable brownout problems
+#include "soc/rtc_cntl_reg.h"  // Disable brownout problems
+#include "driver/rtc_io.h"
+#include <LittleFS.h>
+#include <FS.h>
+#include <Firebase_ESP_Client.h>
+//Provide the token generation process info.
+#include <addons/TokenHelper.h>
+DFRobot_AXP313A axp;
+const char* ssid = "IoT";
+const char* password = "KdGIoT70!";
+
+unsigned long previousMillis = 0;  // will store last time a photo was captured
+const long interval = 10000;  
+
+#define API_KEY "AIzaSyAL2TKb8xnH-Rth6HTTr9XafVmJPlbJ4-4"
+#define STORAGE_BUCKET_ID "esp-firebase-9c1f2.appspot.com"
+#define USER_EMAIL "eli.wauters.1@student.kdg.be"
+#define USER_PASSWORD "Haloufboys"
+
+int teller = 0;  // Counter for the photos
+// Photo File Name to save in LittleFS
+#define FILE_PHOTO_PATH "/photo" + String(teller) + ".jpg"
+#define BUCKET_PHOTO "/data/photo.jpg"
+
+void startCameraServer();
+
 #define PWDN_GPIO_NUM     -1
 #define RESET_GPIO_NUM    -1
 #define XCLK_GPIO_NUM     45
@@ -30,26 +57,78 @@
 #define HREF_GPIO_NUM     42
 #define PCLK_GPIO_NUM     5
 
+boolean takeNewPhoto = true;
 
-DFRobot_AXP313A axp;
+//Define Firebase Data objects
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig configF;
 
-// ===========================
-// Enter your WiFi credentials
-// ===========================
-const char* ssid = "Eli";
-const char* password = "elihp1705";
+void fcsUploadCallback(FCS_UploadStatusInfo info);
 
-void startCameraServer();
+bool taskCompleted = false;
 
-void setup() {
-  Serial.begin(115200);
-  Serial.setDebugOutput(true);
-  Serial.println();
-  while(axp.begin() != 0){
+// Capture Photo and Save it to LittleFS
+void capturePhotoSaveLittleFS(String filePath) {
+  camera_fb_t* fb = NULL;
+  // Dispose of first pictures because of bad quality
+  for (int i = 0; i < 4; i++) {
+    fb = esp_camera_fb_get();
+    esp_camera_fb_return(fb);
+    fb = NULL;
+  }
+
+  // Take a new photo
+  fb = esp_camera_fb_get();
+  if (!fb) {
+    Serial.println("Camera capture failed");
+    delay(1000);
+    ESP.restart();
+  }
+
+  // Open the file for writing
+  File file = LittleFS.open(filePath, FILE_WRITE);
+  if (!file) {
+    Serial.println("Failed to open file in writing mode");
+  } else {
+    file.write(fb->buf, fb->len); // payload (image), payload length
+    Serial.print("The picture has been saved in ");
+    Serial.print(filePath);
+    Serial.print(" - Size: ");
+    Serial.print(fb->len);
+    Serial.println(" bytes");
+  }
+  // Close the file
+  file.close();
+  esp_camera_fb_return(fb);
+}
+
+
+void initWiFi(){
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+}
+
+void initLittleFS(){
+  if (!LittleFS.begin(true)) {
+    Serial.println("An Error has occurred while mounting LittleFS");
+    ESP.restart();
+  }
+  else {
+    delay(500);
+    Serial.println("LittleFS mounted successfully");
+  }
+}
+
+void initCamera(){
+ while(axp.begin() != 0){
     Serial.println("init error");
     delay(1000);
   }
-  axp.enableCameraPower(axp.eOV2640);//设置摄像头供电
+  axp.enableCameraPower(axp.eOV2640); // Enable camera power
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -77,7 +156,7 @@ void setup() {
   config.fb_location = CAMERA_FB_IN_PSRAM;
   config.jpeg_quality = 12;
   config.fb_count = 1;
-
+ 
   // if PSRAM IC present, init with UXGA resolution and higher JPEG quality
   //                      for larger pre-allocated frame buffer.
   if(config.pixel_format == PIXFORMAT_JPEG){
@@ -97,19 +176,19 @@ void setup() {
     config.fb_count = 2;
 #endif
   }
-
+ 
 #if defined(CAMERA_MODEL_ESP_EYE)
   pinMode(13, INPUT_PULLUP);
   pinMode(14, INPUT_PULLUP);
 #endif
-
+ 
   // camera init
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
     return;
   }
-
+ 
   sensor_t * s = esp_camera_sensor_get();
   // initial sensors are flipped vertically and colors are a bit saturated
   if (s->id.PID == OV3660_PID) {
@@ -121,34 +200,102 @@ void setup() {
   if(config.pixel_format == PIXFORMAT_JPEG){
     s->set_framesize(s, FRAMESIZE_QVGA);
   }
-
+ 
 #if defined(CAMERA_MODEL_M5STACK_WIDE) || defined(CAMERA_MODEL_M5STACK_ESP32CAM)
   s->set_vflip(s, 1);
   s->set_hmirror(s, 1);
 #endif
-
+ 
 #if defined(CAMERA_MODEL_ESP32S3_EYE)
   s->set_vflip(s, 1);
 #endif
+}
 
-  WiFi.begin(ssid, password);
-  WiFi.setSleep(false);
 
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("");
-  Serial.println("WiFi connected");
+void setup() {
+  // Serial port for debugging purposes
+  Serial.begin(115200);
+  initWiFi();
+  initLittleFS();
+  // Turn-off the 'brownout detector'
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+  initCamera();
 
+  //Firebase
+  // Assign the api key
+  configF.api_key = API_KEY;
+  //Assign the user sign in credentials
+  auth.user.email = USER_EMAIL;
+  auth.user.password = USER_PASSWORD;
+  //Assign the callback function for the long running token generation task
+  configF.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
+
+  Firebase.begin(&configF, &auth);
+  Firebase.reconnectWiFi(true);
+  
   startCameraServer();
-
+ 
   Serial.print("Camera Ready! Use 'http://");
   Serial.print(WiFi.localIP());
   Serial.println("' to connect");
 }
 
 void loop() {
-  // Do nothing. Everything is done in another task by the web server
-  delay(10000);
+  unsigned  long currentMillis = millis();
+
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;  // save the last time a photo was taken
+
+    // Generate a unique filename for each photo
+    String fileName = "/photo" + String(teller) + ".jpg";
+    String firebasePath = "/data/photo" + String(teller) + ".jpg"; // Unique path for Firebase Storage
+
+    // Take a new photo and save it
+    capturePhotoSaveLittleFS(fileName);
+
+    // Upload the photo to Firebase
+    if (Firebase.ready() && !taskCompleted) {
+      taskCompleted = true;
+      Serial.print("Uploading picture... ");
+
+      if (Firebase.Storage.upload(&fbdo, STORAGE_BUCKET_ID, fileName, mem_storage_type_flash, firebasePath, "image/jpeg", fcsUploadCallback)) {
+        Serial.printf("\nDownload URL: %s\n", fbdo.downloadURL().c_str());
+        teller++;  // Increment the counter after successful upload
+      } else {
+        Serial.println(fbdo.errorReason());
+      }
+      taskCompleted = false;  // Reset the task flag
+    }
+  }
+}
+
+
+
+// The Firebase Storage upload callback function
+void fcsUploadCallback(FCS_UploadStatusInfo info){
+    if (info.status == firebase_fcs_upload_status_init){
+        Serial.printf("Uploading file %s (%d) to %s\n", info.localFileName.c_str(), info.fileSize, info.remoteFileName.c_str());
+    }
+    else if (info.status == firebase_fcs_upload_status_upload)
+    {
+        Serial.printf("Uploaded %d%s, Elapsed time %d ms\n", (int)info.progress, "%", info.elapsedTime);
+    }
+    else if (info.status == firebase_fcs_upload_status_complete)
+    {
+        Serial.println("Upload completed\n");
+        FileMetaInfo meta = fbdo.metaData();
+        Serial.printf("Name: %s\n", meta.name.c_str());
+        Serial.printf("Bucket: %s\n", meta.bucket.c_str());
+        Serial.printf("contentType: %s\n", meta.contentType.c_str());
+        Serial.printf("Size: %d\n", meta.size);
+        Serial.printf("Generation: %lu\n", meta.generation);
+        Serial.printf("Metageneration: %lu\n", meta.metageneration);
+        Serial.printf("ETag: %s\n", meta.etag.c_str());
+        Serial.printf("CRC32: %s\n", meta.crc32.c_str());
+        Serial.printf("Tokens: %s\n", meta.downloadTokens.c_str());
+        Serial.printf("Download URL: %s\n\n", fbdo.downloadURL().c_str());
+    }
+    else if (info.status == firebase_fcs_upload_status_error){
+        Serial.printf("Upload failed, %s\n", info.errorMsg.c_str());
+    }
 }
