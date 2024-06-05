@@ -27,10 +27,10 @@ const char* password = "KdGIoT70!";
 unsigned long previousMillis = 0;  // will store last time a photo was captured
 const long interval = 10000;  
 
-#define API_KEY "AIzaSyAL2TKb8xnH-Rth6HTTr9XafVmJPlbJ4-4"
-#define STORAGE_BUCKET_ID "esp-firebase-9c1f2.appspot.com"
-#define USER_EMAIL "eli.wauters.1@student.kdg.be"
-#define USER_PASSWORD "Haloufboys"
+#define API_KEY ""
+#define STORAGE_BUCKET_ID ""
+#define USER_EMAIL ".kdg.be"
+#define USER_PASSWORD ""
 
 int teller = 0;  // Counter for the photos
 // Photo File Name to save in LittleFS
